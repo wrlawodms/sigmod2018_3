@@ -80,13 +80,17 @@ void Relation::loadRelation(const char* fileName)
     addr+=sizeof(size);
     auto numColumns=*reinterpret_cast<size_t*>(addr);
     addr+=sizeof(size_t);
+    this->columns.push_back(reinterpret_cast<uint64_t*>(malloc(sizeof(uint64_t)*size)));
+    for (uint64_t i=0; i<size; i++) {
+        columns[0][i] = 1;
+    }
     for (unsigned i=0;i<numColumns;++i) {
         this->columns.push_back(reinterpret_cast<uint64_t*>(addr));
         addr+=size*sizeof(uint64_t);
     }
 }
 //---------------------------------------------------------------------------
-Relation::Relation(const char* fileName) : ownsMemory(false)
+Relation::Relation(const char* fileName, unsigned rId) : rId(rId), ownsMemory(false)
 // Constructor that loads relation from disk
 {
     loadRelation(fileName);

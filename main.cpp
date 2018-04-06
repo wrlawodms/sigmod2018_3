@@ -15,9 +15,9 @@ using namespace std;
 	}
 #endif
 
+Joiner joiner(THREAD_NUM);
 //---------------------------------------------------------------------------
 int main(int argc, char* argv[]) {
-    Joiner joiner(THREAD_NUM);
     // Read join relations
     string line;
     while (getline(cin, line)) {

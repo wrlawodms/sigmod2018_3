@@ -17,6 +17,8 @@ public:
     uint64_t size;
     /// The join column containing the keys
     std::vector<uint64_t*> columns;
+    ///
+    RelationId rId;
 
     /// Stores a relation into a file (binary)
     void storeRelation(const std::string& fileName);
@@ -28,7 +30,7 @@ public:
     /// Constructor without mmap
     Relation(uint64_t size,std::vector<uint64_t*>&& columns) : ownsMemory(true), size(size), columns(columns) {}
     /// Constructor using mmap
-    Relation(const char* fileName);
+    Relation(const char* fileName, RelationId rId);
     /// Delete copy constructor
     Relation(const Relation& other)=delete;
     /// Move constructor

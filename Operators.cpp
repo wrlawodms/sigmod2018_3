@@ -1,5 +1,6 @@
 #include "Operators.hpp"
 #include <cassert>
+#include <unordered_set>
 #include <iostream>
 #include <thread>
 #include <mutex>
@@ -41,7 +42,7 @@ bool Scan::require(SelectInfo info)
 //        resultColumns.push_back(relation.columns[info.colId]);
         results.emplace_back(1);
         infos.push_back(info);
-		select2ResultColId[info]=results.size()-1;
+		select2ResultColId[info]=results.size(); // @TODO: coupling..  col0을 뒤에서 추가할 것이기때문에 이렇게할 수 있는것 .
     }
     return true;
 }
@@ -54,10 +55,13 @@ void Scan::asyncRun(boost::asio::io_service& ioService) {
 #ifdef VERBOSE
     cout << "Scan("<< queryIndex << "," << operatorIndex <<")::asyncRun, Task" << endl;
 #endif
+    results.emplace_back(1);
     pendingAsyncOperator = 0;
+    results[0].addTuples(0, relation.columns[0], relation.size);
+    results[0].fix();
     for (int i=0; i<infos.size(); i++) {
-        results[i].addTuples(0, relation.columns[infos[i].colId], relation.size);
-        results[i].fix();
+        results[i+1].addTuples(0, relation.columns[infos[i].colId], relation.size);
+        results[i+1].fix();
     }
     resultSize=relation.size; 
     finishAsyncRun(ioService, true);
@@ -248,7 +252,7 @@ void Join::createAsyncTasks(boost::asio::io_service& ioService) {
     auto& leftInputData=left->getResults();
     auto& rightInputData=right->getResults(); 
 
-    unsigned resColId = 0;
+    unsigned resColId = 1;
     for (auto& info : requestedColumnsLeft) {
         select2ResultColId[info]=resColId++;
     }
@@ -472,6 +476,7 @@ void Join::histogramTask(boost::asio::io_service* ioService, int cntTask, int ta
                 //hashTables.emplace_back();
             }
             unsigned probingResultSize = resultIndex[cntPartition];
+            results.emplace_back(probingResultSize); // fot cntCol
             for (int i=0; i<requestedColumns.size(); i++) {
                 results.emplace_back(probingResultSize);
             }
@@ -604,13 +609,14 @@ void Join::scatteringTask(boost::asio::io_service* ioService, int taskIndex, int
     }
 }
 
+//unordered_set<void*> printed;
 void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vector<uint64_t*> localLeft, uint64_t limitLeft, vector<uint64_t*> localRight, uint64_t limitRight) {
     // Resolve the partitioned columns
     // unordered_multimap<uint64_t, uint64_t>& hashTable = hashTables[taskIndex];
 //    shared_ptr<unordered_multimap<uint64_t, uint64_t>> hashTable = make_shared<unordered_multimap<uint64_t, uint64_t>>();
 
     if (limitLeft > limitRight*2){
-        //__sync_fetch_and_add(&cnt, 1);
+       // __sync_fetch_and_add(&cnt, 1);
          /*
         cerr << "Warning : left partition > right partition - " << limitLeft << " > "<< limitRight << endl;
         cerr << "totalLeft: " << left->resultSize << " taotalRight: " << right->resultSize << " " << cntPartition << endl;
@@ -666,26 +672,32 @@ void Join::buildingTask(boost::asio::io_service* ioService, int taskIndex, vecto
             hashTableIndices->reserve(limitLeft*2);
         }
 
-        /*
+        
         unordered_map<uint64_t, uint64_t> xx;
         for (uint64_t i=0; i<limitLeft; i++) {
             ++xx[leftKeyColumn[i]];
         }
+        /*
         if (limitLeft > limitRight*2) {
             static int ccnt = 0;
+            if( printed.find((void*)this) == printed.end()) {
+                printed.emplace((void*)this);
             if (ccnt++ < 50) {
                 uint64_t max = 0;
                 for (auto it=xx.begin(); it !=xx.end(); ++it) {
                     if (max < it->second)
                         max = it->second;
                 }
-                cerr << limitLeft << " " << max << " " << max/(limitLeft*1.0) << " " << needCntOnly <<endl ;
+                cerr << limitLeft << " " << max << " " << max/(limitLeft*1.0) << " " << needCntOnly 
+                << " " <<  requestedColumnsLeft.size() << " " << requestedColumnsRight.size() << " " << cntPartition << endl ;
             }
-        }*/
+            }
+        }
+        */
         
         for (uint64_t i=0; i<limitLeft; i++) {
             if (needCntOnly) {
-                (*hashTableCnt)[leftKeyColumn[i]]++; 
+                (*hashTableCnt)[leftKeyColumn[i]]+=localLeft[0][i]; 
             } else {
                 hashTableIndices->emplace(make_pair(leftKeyColumn[i],i));
             }
@@ -731,7 +743,7 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
     uint64_t limit = start+length;
     unsigned leftColSize = requestedColumnsLeft.size();
     unsigned rightColSize = requestedColumnsRight.size();
-    unsigned resultColSize = requestedColumns.size(); 
+    unsigned resultColSize = requestedColumns.size()+1; 
     unordered_multimap<uint64_t, uint64_t>* hashTableIndices = NULL;
     unordered_map<uint64_t, uint64_t>* hashTableCnt = NULL;
     if (needCntOnly) { 
@@ -743,6 +755,7 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
     if (leftLength == 0 || length == 0)
         goto probing_finish;
     
+    localResults.emplace_back(); // for cntCol
     for (unsigned j=0; j<requestedColumns.size(); j++) {
         localResults.emplace_back();
     }
@@ -762,14 +775,15 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
                 if (hashTableCnt->find(rightKey) == hashTableCnt->end())
                     continue;
                 uint64_t cnt = hashTableCnt->at(rightKey);
-                for (uint64_t j=0; j<cnt; j++) {
-                    unsigned relColId=0;
-                    for (unsigned cId=0;cId<leftColSize;++cId)
-                        localResults[relColId++].push_back(rightKey);
-                    for (unsigned cId=0;cId<rightColSize;++cId)
-                        localResults[relColId++].push_back(copyRightData[cId][i]);
+//                for (uint64_t j=0; j<cnt; j++) {
+                unsigned relColId=0;
+                localResults[relColId++].push_back(cnt*localRight[0][i]);
+                for (unsigned cId=0;cId<leftColSize;++cId)
+                    localResults[relColId++].push_back(rightKey);
+                for (unsigned cId=0;cId<rightColSize;++cId)
+                    localResults[relColId++].push_back(copyRightData[cId][i]);
                 }
-            }
+//            }
         }else {
             for (uint64_t i=start; i<limit; i++) {
                 rightKey=rightKeyColumn[i];
@@ -780,6 +794,7 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
                 auto range=hashTableIndices->equal_range(rightKey);
                 for (auto iter=range.first;iter!=range.second;++iter) {
                     unsigned relColId=0;
+                    localResults[relColId++].push_back(localLeft[0][iter->second]*localRight[0][i]);
                     for (unsigned cId=0;cId<leftColSize;++cId)
                         localResults[relColId++].push_back(copyLeftData[cId][iter->second]);
                     for (unsigned cId=0;cId<rightColSize;++cId)
@@ -792,6 +807,7 @@ void Join::probingTask(boost::asio::io_service* ioService, int partIndex, int ta
             for (uint64_t j=start; j<limit; j++) {
                 if (leftKeyColumn[i] == rightKeyColumn[j]) {
                     unsigned relColId=0;
+                    localResults[relColId++].push_back(localLeft[0][i]*localRight[0][j]);
                     for (unsigned cId=0;cId<leftColSize;++cId)
                         localResults[relColId++].push_back(copyLeftData[cId][i]);
                     for (unsigned cId=0;cId<rightColSize;++cId)
@@ -819,7 +835,7 @@ probing_finish:
 #ifdef VERBOSE
         cout << "Join("<< queryIndex << "," << operatorIndex <<") join finish. result size: " << resultSize << endl;
 #endif
-        for (unsigned cId=0;cId<requestedColumns.size();++cId) {
+        for (unsigned cId=0;cId<resultColSize;++cId) {
             results[cId].fix();
         }
 /*
@@ -951,6 +967,8 @@ void SelfJoin::createAsyncTasks(boost::asio::io_service& ioService) {
     
     auto& inputData=input->getResults();
     
+    copyData.emplace_back(&inputData[0]);  //for cntCol
+    results.emplace_back(cntTask);
     for (auto& iu : requiredIUs) {
         auto id=input->resolve(iu);
         copyData.emplace_back(&inputData[id]);
@@ -998,9 +1016,10 @@ void Checksum::checksumTask(boost::asio::io_service* ioService, int taskIndex, u
     for (auto& sInfo : colInfo) {
         auto colId = input->resolve(sInfo);
         auto inputColIt = inputData[colId].begin(start);
+        auto cntColIt = inputData[0].begin(start);
         uint64_t sum=0;
-        for (int i=0; i<length; i++,++inputColIt)
-            sum += *inputColIt;
+        for (int i=0; i<length; i++,++inputColIt, ++cntColIt)
+            sum += (*inputColIt)*(*cntColIt);
         __sync_fetch_and_add(&checkSums[sumIndex++], sum);
     }
     

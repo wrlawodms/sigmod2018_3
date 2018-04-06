@@ -56,7 +56,7 @@ class Joiner {
             threadPool.create_thread([&]() {
                     // cout << "Test" << endl;
                     tid = __sync_fetch_and_add(&nextTid, 1);
-                    localMemPool[tid] = new MemoryPool(4*1024*1024*1024lu, 4096);
+                    localMemPool[tid] = new MemoryPool(100*1024*1024*1024lu, 4096);
                     ioService.run();
                 });
         }

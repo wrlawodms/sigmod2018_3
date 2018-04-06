@@ -98,7 +98,8 @@ protected:
 
 public:
     /// The constructor
-    Scan(Relation& r,unsigned relationBinding) : relation(r), relationBinding(relationBinding) {};
+    Scan(Relation& r,unsigned relationBinding) : relation(r), relationBinding(relationBinding) {
+     } 
     /// Require a column and add it to results
     bool require(SelectInfo info) override;
     /// AsyncRun
@@ -127,7 +128,9 @@ class FilterScan : public Scan {
     void filterTask(boost::asio::io_service* ioService, int taskIndex, uint64_t start, uint64_t length);
 public:
     /// The constructor
-    FilterScan(Relation& r,std::vector<FilterInfo> filters) : Scan(r,filters[0].filterColumn.binding), filters(filters)  {};
+    FilterScan(Relation& r,std::vector<FilterInfo> filters) : Scan(r,filters[0].filterColumn.binding), filters(filters)  {
+       inputData.push_back(relation.columns[0]); // for cnt
+    };
     /// The constructor
     FilterScan(Relation& r,FilterInfo& filterInfo) : FilterScan(r,std::vector<FilterInfo>{filterInfo}) {};
     /// Require a column and add it to results
@@ -224,7 +227,9 @@ class Join : public Operator {
 
 public:
     /// The constructor
-    Join(std::shared_ptr<Operator>& left,std::shared_ptr<Operator>& right,PredicateInfo pInfo) : left(left), right(right), pInfo(pInfo) {};
+    Join(std::shared_ptr<Operator>& left,std::shared_ptr<Operator>& right,PredicateInfo pInfo) : left(left), right(right), pInfo(pInfo) {
+             
+    };
     ~Join() {
 
 //        free(partitionTable[0]);

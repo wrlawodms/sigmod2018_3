@@ -15,7 +15,7 @@ using namespace std;
 void Joiner::addRelation(const char* fileName)
 // Loads a relation from disk
 {
-    relations.emplace_back(fileName);
+    relations.emplace_back(fileName, relations.size());
 }
 //---------------------------------------------------------------------------
 void Joiner::printAsyncJoinInfo() {
